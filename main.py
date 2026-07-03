@@ -17,20 +17,17 @@ class PosePacket(BaseModel):
     user_id: str
     timestamp: int
     body: List[Landmark]
-    left_hand: Optional[list] = None
-    right_hand: Optional[list] = None
+    left_hand: Optional[List[Landmark]] = None
+    right_hand: Optional[List[Landmark]] = None
 
 # -------------------------
-# SIMPLE GAME LOGIC
+# GAME LOGIC
 # -------------------------
-def process_pose(packet: PosePacket):
-    if len(packet.body) < 25:
-        return {"error": "invalid pose"}
-
+def process(packet: PosePacket):
     actions = []
     score = 0
 
-    try:
+    if len(packet.body) >= 25:
         hip = packet.body[23].y
         knee = packet.body[25].y
 
@@ -39,15 +36,13 @@ def process_pose(packet: PosePacket):
         else:
             actions.append("squat")
             score += 10
-    except:
-        pass
 
     if packet.left_hand:
-        actions.append("left_hand")
+        actions.append("left_hand_active")
         score += 2
 
     if packet.right_hand:
-        actions.append("right_hand")
+        actions.append("right_hand_active")
         score += 2
 
     return {
@@ -57,27 +52,27 @@ def process_pose(packet: PosePacket):
     }
 
 # -------------------------
-# HTTP TEST ROUTE
+# HEALTH CHECK
 # -------------------------
 @app.get("/")
 def home():
-    return {"status": "MotionPlay API running"}
+    return {"status": "MotionPlay running"}
 
 # -------------------------
-# WEBSOCKET ROUTE
+# WEBSOCKET
 # -------------------------
 @app.websocket("/pose")
-async def pose_socket(websocket: WebSocket):
-    await websocket.accept()
+async def pose_socket(ws: WebSocket):
+    await ws.accept()
 
     while True:
         try:
-            data = await websocket.receive_json()
+            data = await ws.receive_json()
             packet = PosePacket(**data)
 
-            result = process_pose(packet)
+            result = process(packet)
 
-            await websocket.send_json(result)
+            await ws.send_json(result)
 
         except Exception as e:
-            await websocket.send_json({"error": str(e)})
+            await ws.send_json({"error": str(e)})
