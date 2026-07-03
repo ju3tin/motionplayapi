@@ -5,7 +5,7 @@ from typing import List, Optional
 app = FastAPI()
 
 # -------------------------
-# DATA MODEL
+# DATA STRUCTURE
 # -------------------------
 class Landmark(BaseModel):
     x: float
@@ -21,13 +21,14 @@ class PosePacket(BaseModel):
     right_hand: Optional[List[Landmark]] = None
 
 # -------------------------
-# GAME LOGIC
+# SIMPLE GAME LOGIC
 # -------------------------
 def process(packet: PosePacket):
     actions = []
     score = 0
 
-    if len(packet.body) >= 25:
+    # squat detection
+    if len(packet.body) >= 26:
         hip = packet.body[23].y
         knee = packet.body[25].y
 
@@ -37,12 +38,13 @@ def process(packet: PosePacket):
             actions.append("squat")
             score += 10
 
+    # hand detection
     if packet.left_hand:
-        actions.append("left_hand_active")
+        actions.append("left_hand")
         score += 2
 
     if packet.right_hand:
-        actions.append("right_hand_active")
+        actions.append("right_hand")
         score += 2
 
     return {
@@ -66,13 +68,8 @@ async def pose_socket(ws: WebSocket):
     await ws.accept()
 
     while True:
-        try:
-            data = await ws.receive_json()
-            packet = PosePacket(**data)
+        data = await ws.receive_json()
+        packet = PosePacket(**data)
 
-            result = process(packet)
-
-            await ws.send_json(result)
-
-        except Exception as e:
-            await ws.send_json({"error": str(e)})
+        result = process(packet)
+        await ws.send_json(result)
