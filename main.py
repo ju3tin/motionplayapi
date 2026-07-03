@@ -1,75 +1,60 @@
-from fastapi import FastAPI, WebSocket
-from pydantic import BaseModel
-from typing import List, Optional
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi.responses import HTMLResponse
+import uvicorn
+import json
+from datetime import datetime
+import asyncio
 
-app = FastAPI()
+app = FastAPI(title="MotionPlay Backend")
 
-# -------------------------
-# DATA STRUCTURE
-# -------------------------
-class Landmark(BaseModel):
-    x: float
-    y: float
-    z: float = 0.0
-    visibility: Optional[float] = None
+# Store connected clients
+connected_clients = {}
 
-class PosePacket(BaseModel):
-    user_id: str
-    timestamp: int
-    body: List[Landmark]
-    left_hand: Optional[List[Landmark]] = None
-    right_hand: Optional[List[Landmark]] = None
+@app.get("/")
+async def get_root():
+    return {"status": "MotionPlay Backend is running"}
 
-# -------------------------
-# SIMPLE GAME LOGIC
-# -------------------------
-def process(packet: PosePacket):
-    actions = []
-    score = 0
+@app.websocket("/pose")
+async def websocket_endpoint(websocket: WebSocket):
+    await websocket.accept()
+    client_id = None
+    
+    try:
+        while True:
+            data = await websocket.receive_text()
+            packet = json.loads(data)
+            
+            client_id = packet.get("user_id", "unknown")
+            timestamp = datetime.now().strftime("%H:%M:%S")
+            
+            # Store latest data
+            connected_clients[client_id] = {
+                "data": packet,
+                "last_seen": timestamp
+            }
+            
+            # Echo back confirmation
+            await websocket.send_json({
+                "status": "received",
+                "user_id": client_id,
+                "timestamp": timestamp,
+                "landmarks_count": len(packet.get("body", []))
+            })
+            
+    except WebSocketDisconnect:
+        print(f"Client {client_id} disconnected")
+    except Exception as e:
+        print(f"Error: {e}")
+    finally:
+        if client_id in connected_clients:
+            del connected_clients[client_id]
 
-    # squat detection
-    if len(packet.body) >= 26:
-        hip = packet.body[23].y
-        knee = packet.body[25].y
-
-        if hip > knee:
-            actions.append("standing")
-        else:
-            actions.append("squat")
-            score += 10
-
-    # hand detection
-    if packet.left_hand:
-        actions.append("left_hand")
-        score += 2
-
-    if packet.right_hand:
-        actions.append("right_hand")
-        score += 2
-
+@app.get("/clients")
+async def get_clients():
     return {
-        "user_id": packet.user_id,
-        "actions": actions,
-        "score": score
+        "connected": len(connected_clients),
+        "clients": list(connected_clients.keys())
     }
 
-# -------------------------
-# HEALTH CHECK
-# -------------------------
-@app.get("/")
-def home():
-    return {"status": "MotionPlay running"}
-
-# -------------------------
-# WEBSOCKET
-# -------------------------
-@app.websocket("/pose")
-async def pose_socket(ws: WebSocket):
-    await ws.accept()
-
-    while True:
-        data = await ws.receive_json()
-        packet = PosePacket(**data)
-
-        result = process(packet)
-        await ws.send_json(result)
+if __name__ == "__main__":
+    uvicorn.run(app, host="0.0.0.0", port=8000)
